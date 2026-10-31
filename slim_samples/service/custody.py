@@ -65,9 +65,14 @@ def get_container(session: Session, container_id: int) -> Container:
     return found[0]
 
 
+def all_containers(session: Session) -> list[Container]:
+    """Every container ever received, including the finished ones."""
+    return store.load(session)
+
+
 def active_containers(session: Session) -> list[Container]:
     """Everything still in the lab (not disposed or returned)."""
-    return [c for c in store.load(session) if c.active]
+    return [c for c in all_containers(session) if c.active]
 
 
 def due_for_disposal(session: Session, today: date, within_days: int = 0) -> list[Container]:
