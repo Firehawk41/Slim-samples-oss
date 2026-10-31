@@ -309,3 +309,17 @@ def test_verify_finds_a_retention_date_the_rules_dont_give(session, r):
     assert [p.message for p in custody.verify(session)] == [
         f"retention is {TODAY}, rules give {TODAY + timedelta(days=90)}"
     ]
+
+
+def test_a_requests_bottles_are_found_by_prefix(session, r):
+    receive(session, r)
+    receive(session, r, sample="TR00001-02")
+    assert [c.sample for c in custody.containers_with_prefix(session, "TR00001-")] == [
+        "TR00001-01",
+        "TR00001-02",
+    ]
+    assert (
+        custody.containers_with_prefix(session, "TR0000") != []
+        and custody.containers_with_prefix(session, "TR2") == []
+    )
+    assert custody.containers_with_prefix(session, "TR%") == []  # a wildcard is not a wildcard

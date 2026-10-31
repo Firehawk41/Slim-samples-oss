@@ -58,6 +58,12 @@ def containers_for(session: Session, samples: Sequence[str]) -> dict[str, list[C
     return found
 
 
+def containers_with_prefix(session: Session, prefix: str) -> list[Container]:
+    """Every container whose lab sample ID starts with `prefix` (a request's samples: "TR00042-")."""
+    escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return store.load(session, containers_table.c.sample.like(f"{escaped}%", escape="\\"))
+
+
 def get_container(session: Session, container_id: int) -> Container:
     found = store.load(session, ids=[container_id])
     if not found:
