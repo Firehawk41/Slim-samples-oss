@@ -17,7 +17,7 @@ a real lab's databases (`persistence/oss_guard.py`).
 
 | File | What |
 |---|---|
-| `docs/DECISIONS.md` | **Authoritative.** S-01…S-11; append, never edit history. |
+| `docs/DECISIONS.md` | **Authoritative.** S-01…S-12; append, never edit history. |
 
 ## File map
 
@@ -29,7 +29,7 @@ slim_samples/
 ├── persistence/   # oss_guard, db (make_engine = the only create_engine), migrate, migrations/, types, append_only, audit,
 │                  #   tables (samples_rules / _containers / _events), rules (publish_rules, current_rules), store (insert, load)
 ├── service/       # custody: receive, add_container, move, note_conditions, correct, hold, release_hold, dispose,
-│                  #   return_to_customer, reading (containers_of / _for, due_for_disposal, flags_for, blocked_for, labels_for),
+│                  #   return_to_customer, undo_finish (S-12), reading (containers_of / _for, due_for_disposal, flags_for, blocked_for, labels_for),
 │                  #   verify; rules
 └── demo.py        # DEMO_RULES: invented lists the host seeds
 tests/             # factories; domain/; service/; architecture, OSS guard, migrations

@@ -5,7 +5,7 @@ a person could get it wrong, a reason. A finished container (disposed or returne
 """
 
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -376,6 +376,42 @@ def return_to_customer(session: Session, container_id: int, *, actor: Actor, not
     return get_container(session, container_id)
 
 
+def undo_finish(
+    session: Session,
+    container_id: int,
+    *,
+    actor: Actor,
+    rules: PublishedRules,
+    reason: str,
+    location: str,
+    now: datetime,
+):
+    """A disposal or return recorded by mistake: the bottle is still here (S-12). A supervisor or quality,
+    with a reason and where it is, within the lab's `undo_days` of the disposal. The bottle is active again;
+    both events stay in its history. A hold it had before is kept."""
+    _staff(actor)
+    if not actor.may_release_hold:
+        raise NotAllowed(f"{actor.display} may not undo a disposal: a supervisor or quality does")
+    _reason(reason, "how it was found still here")
+    container = get_container(session, container_id)
+    if container.active:
+        raise Refused(Problem(where=container.title, message="not disposed of or returned: nothing to undo"))
+    if rules.rules.location(location) is None:
+        raise Refused(Problem(where="location", message=f"unknown location {location!r}"))
+    days = rules.rules.undo_days
+    if now - container.finished_on > timedelta(days=days):
+        raise Refused(
+            Problem(
+                where=container.title, message=f"finished more than {days} days ago: it can't be undone now"
+            )
+        )
+    store.insert_event(
+        session, container_id, EventKind.UNDONE, actor, location=location, body={"reason": reason.strip()}
+    )
+    session.flush()
+    return get_container(session, container_id)
+
+
 # ---------------------------------------------------------------------------- checking
 
 
@@ -400,6 +436,14 @@ def verify(session: Session) -> list[Problem]:
             )
         final_seen = False
         for e in c.events:
+            if e.kind == EventKind.UNDONE:  # S-12: an undo reopens a finished bottle, and only one
+                if not final_seen:
+                    problems.append(
+                        Problem(where=f"{c.sample}/{c.position}", message="an undo with nothing finished")
+                    )
+                    break
+                final_seen = False
+                continue
             if final_seen:
                 problems.append(
                     Problem(where=f"{c.sample}/{c.position}", message="an event after it was finished")

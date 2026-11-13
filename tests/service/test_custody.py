@@ -323,3 +323,45 @@ def test_a_requests_bottles_are_found_by_prefix(session, r):
         and custody.containers_with_prefix(session, "TR2") == []
     )
     assert custody.containers_with_prefix(session, "TR%") == []  # a wildcard is not a wildcard
+
+
+def test_s12_a_disposal_recorded_by_mistake_is_undone_and_both_stay_in_the_history(session, r):
+    """S-12: the bottle is still on the shelf. A supervisor or quality, with a reason and where it is, within
+    the lab's days, makes it active again; a hold it had stays; an analyst can't, nor can anyone too late."""
+    from datetime import UTC, datetime
+
+    (c,) = receive(session, r)
+    custody.hold(session, c.id, actor=ANALYST, reason="open complaint")
+    custody.release_hold(session, c.id, actor=SUPERVISOR, reason="complaint closed")
+    custody.hold(session, c.id, actor=ANALYST, reason="open nonconformity")
+    custody.release_hold(session, c.id, actor=SUPERVISOR, reason="cleared")
+    done = custody.dispose(
+        session, c.id, actor=ANALYST, rules=r, method="Vendor pickup", today=c.retention_due
+    )
+    now = done.finished_on + timedelta(hours=2)
+    with pytest.raises(NotAllowed, match="may not undo"):
+        custody.undo_finish(session, c.id, actor=ANALYST, rules=r, reason="x", location="shelf-a", now=now)
+    with pytest.raises(Refused, match="say why"):
+        custody.undo_finish(session, c.id, actor=SUPERVISOR, rules=r, reason=" ", location="shelf-a", now=now)
+    with pytest.raises(Refused, match="unknown location"):
+        custody.undo_finish(session, c.id, actor=SUPERVISOR, rules=r, reason="x", location="attic", now=now)
+    late = done.finished_on + timedelta(days=r.rules.undo_days, minutes=1)
+    with pytest.raises(Refused, match="can't be undone now"):
+        custody.undo_finish(session, c.id, actor=QUALITY, rules=r, reason="x", location="shelf-a", now=late)
+    back = custody.undo_finish(
+        session, c.id, actor=QUALITY, rules=r, reason="found on shelf A, never collected", location="shelf-a",
+        now=now,
+    )  # fmt: skip
+    assert back.active and back.outcome is None and back.finished_on is None
+    assert back.current_location == "shelf-a"
+    assert [e.kind for e in back.events][-2:] == [EventKind.DISPOSED, EventKind.UNDONE]
+    with pytest.raises(Refused, match="nothing to undo"):
+        custody.undo_finish(session, c.id, actor=QUALITY, rules=r, reason="x", location="shelf-a", now=now)
+    moved = custody.move(session, c.id, "fridge-1", actor=ANALYST, rules=r)  # it takes events again
+    assert moved.current_location == "fridge-1" and custody.verify(session) == []
+    custody.return_to_customer(session, c.id, actor=ANALYST)  # a wrong "returned" is undone the same way
+    again = custody.undo_finish(
+        session, c.id, actor=SUPERVISOR, rules=r, reason="courier never came", location="shelf-a",
+        now=datetime.now(UTC),
+    )  # fmt: skip
+    assert again.active and custody.verify(session) == []

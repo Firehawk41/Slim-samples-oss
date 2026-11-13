@@ -53,6 +53,8 @@ class SamplesRules(Frozen):
     disposal_methods: tuple[Label, ...] = Field(min_length=1)
     retention_days: int = Field(ge=1, le=3650)
     retention_overrides: tuple[RetentionOverride, ...] = ()
+    # How long after a disposal or return it may still be undone, when it was recorded by mistake (S-12).
+    undo_days: int = Field(default=7, ge=0, le=365)
 
     @model_validator(mode="after")
     def _unique(self):
