@@ -5,7 +5,7 @@ a person could get it wrong, a reason. A finished container (disposed or returne
 """
 
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -338,13 +338,21 @@ def dispose(
     method: str,
     today: date,
     reason: str = "",
+    despite_hold: bool = False,
 ):
     """Record that a bottle was disposed of. Refused while on hold; before its retention date a reason
-    is required."""
+    is required. `despite_hold`: a held bottle is gone all the same (thrown out by mistake): the record
+    follows what happened, by a supervisor or quality, with a reason (S-13); the hold stays in its history."""
     _staff(actor)
     container = _open(session, container_id)
-    if container.held:
+    if container.held and not despite_hold:
         raise Refused(Problem(where=container.title, message=f"on hold: {container.hold_reason}"))
+    if container.held:
+        if not actor.may_release_hold:
+            raise NotAllowed(
+                f"{actor.display} may not record a held bottle as gone: a supervisor or quality does"
+            )
+        _reason(reason, f"it was on hold ({container.hold_reason})")
     if method not in rules.rules.disposal_methods:
         raise Refused(Problem(where="method", message=f"unknown disposal method {method!r}"))
     if today < container.retention_due:
@@ -354,7 +362,7 @@ def dispose(
         container_id,
         EventKind.DISPOSED,
         actor,
-        body={"method": method, "reason": reason.strip() or None},
+        body={"method": method, "reason": reason.strip() or None, "despite_hold": container.held or None},
     )
     session.flush()
     return get_container(session, container_id)
@@ -371,6 +379,42 @@ def return_to_customer(session: Session, container_id: int, *, actor: Actor, not
         EventKind.RETURNED,
         actor,
         body={"reason": note.strip() or None, "method": "returned"},
+    )
+    session.flush()
+    return get_container(session, container_id)
+
+
+def undo_finish(
+    session: Session,
+    container_id: int,
+    *,
+    actor: Actor,
+    rules: PublishedRules,
+    reason: str,
+    location: str,
+    now: datetime,
+):
+    """A disposal or return recorded by mistake: the bottle is still here (S-12). A supervisor or quality,
+    with a reason and where it is, within the lab's `undo_days` of the disposal. The bottle is active again;
+    both events stay in its history. A hold it had before is kept."""
+    _staff(actor)
+    if not actor.may_release_hold:
+        raise NotAllowed(f"{actor.display} may not undo a disposal: a supervisor or quality does")
+    _reason(reason, "how it was found still here")
+    container = get_container(session, container_id)
+    if container.active:
+        raise Refused(Problem(where=container.title, message="not disposed of or returned: nothing to undo"))
+    if rules.rules.location(location) is None:
+        raise Refused(Problem(where="location", message=f"unknown location {location!r}"))
+    days = rules.rules.undo_days
+    if now - container.finished_on > timedelta(days=days):
+        raise Refused(
+            Problem(
+                where=container.title, message=f"finished more than {days} days ago: it can't be undone now"
+            )
+        )
+    store.insert_event(
+        session, container_id, EventKind.UNDONE, actor, location=location, body={"reason": reason.strip()}
     )
     session.flush()
     return get_container(session, container_id)
@@ -400,6 +444,14 @@ def verify(session: Session) -> list[Problem]:
             )
         final_seen = False
         for e in c.events:
+            if e.kind == EventKind.UNDONE:  # S-12: an undo reopens a finished bottle, and only one
+                if not final_seen:
+                    problems.append(
+                        Problem(where=f"{c.sample}/{c.position}", message="an undo with nothing finished")
+                    )
+                    break
+                final_seen = False
+                continue
             if final_seen:
                 problems.append(
                     Problem(where=f"{c.sample}/{c.position}", message="an event after it was finished")

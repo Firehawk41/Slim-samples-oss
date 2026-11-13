@@ -58,6 +58,7 @@ class EventKind(IntEnum):
     RELEASE = 5  # the hold is lifted
     DISPOSED = 6
     RETURNED = 7
+    UNDONE = 8  # a disposal or return recorded by mistake: the bottle is still here, at `location` (S-12)
 
 
 FINAL = {EventKind.DISPOSED, EventKind.RETURNED}
@@ -104,8 +105,14 @@ class Container(Frozen):
         return next((e for e in reversed(self.events) if e.kind in kinds), None)
 
     @property
+    def _finish(self) -> Event | None:
+        """The disposal or return that stands: the last one, unless undone since (S-12)."""
+        last = self._last(*FINAL, EventKind.UNDONE)
+        return last if last is not None and last.kind in FINAL else None
+
+    @property
     def outcome(self) -> EventKind | None:
-        final = self._last(*FINAL)
+        final = self._finish
         return None if final is None else final.kind
 
     @property
@@ -116,7 +123,7 @@ class Container(Frozen):
     def current_location(self) -> str | None:
         if not self.active:
             return None
-        moved = self._last(EventKind.MOVED)
+        moved = self._last(EventKind.MOVED, EventKind.UNDONE)  # an undo says where it was found (S-12)
         return moved.location if moved else self.location
 
     @property
@@ -163,7 +170,7 @@ class Container(Frozen):
 
     @property
     def finished_on(self) -> datetime | None:
-        final = self._last(*FINAL)
+        final = self._finish
         return None if final is None else final.at
 
     @property
