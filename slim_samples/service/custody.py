@@ -338,13 +338,21 @@ def dispose(
     method: str,
     today: date,
     reason: str = "",
+    despite_hold: bool = False,
 ):
     """Record that a bottle was disposed of. Refused while on hold; before its retention date a reason
-    is required."""
+    is required. `despite_hold`: a held bottle is gone all the same (thrown out by mistake): the record
+    follows what happened, by a supervisor or quality, with a reason (S-13); the hold stays in its history."""
     _staff(actor)
     container = _open(session, container_id)
-    if container.held:
+    if container.held and not despite_hold:
         raise Refused(Problem(where=container.title, message=f"on hold: {container.hold_reason}"))
+    if container.held:
+        if not actor.may_release_hold:
+            raise NotAllowed(
+                f"{actor.display} may not record a held bottle as gone: a supervisor or quality does"
+            )
+        _reason(reason, f"it was on hold ({container.hold_reason})")
     if method not in rules.rules.disposal_methods:
         raise Refused(Problem(where="method", message=f"unknown disposal method {method!r}"))
     if today < container.retention_due:
@@ -354,7 +362,7 @@ def dispose(
         container_id,
         EventKind.DISPOSED,
         actor,
-        body={"method": method, "reason": reason.strip() or None},
+        body={"method": method, "reason": reason.strip() or None, "despite_hold": container.held or None},
     )
     session.flush()
     return get_container(session, container_id)

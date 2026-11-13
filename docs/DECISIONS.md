@@ -74,3 +74,11 @@ slim-data-oss `docs/DECISIONS.md` (D-120 records this module); who decided what 
   disposal or return.
   - Rejected: deleting or editing the disposal (append-only, S-05); no time limit (a bottle gone for months
     is not a wrong click: that is a nonconformity, raised by the lab).
+
+- **S-13 A held bottle that is gone is recorded as gone** (Jamie, 2026-11-13: "what if a bottle was supposed
+  to be held and someone accidentally disposed of it irl"; with S-12, the record follows what happened). A
+  hold still refuses a disposal, unless the person records it *despite the hold*: a supervisor or quality,
+  with a reason. The disposal says so (`despite_hold`); the hold stays in the history. The host raises a
+  nonconformity for it (slim-lims-oss X-2): the item was evidence.
+  - Rejected: refusing it (the record would say a bottle is on the shelf that isn't); lifting the hold first
+    (two steps, and "hold lifted" would claim the reason for it had ended).

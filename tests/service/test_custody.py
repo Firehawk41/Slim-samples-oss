@@ -365,3 +365,30 @@ def test_s12_a_disposal_recorded_by_mistake_is_undone_and_both_stay_in_the_histo
         now=datetime.now(UTC),
     )  # fmt: skip
     assert again.active and custody.verify(session) == []
+
+
+def test_s13_a_held_bottle_thrown_out_by_mistake_is_recorded_as_gone(session, r):
+    """S-13: the record follows what happened. A held bottle that is gone is recorded as disposed of by a
+    supervisor or quality, with a reason; an analyst can't; without saying so, a hold still refuses."""
+    (c,) = receive(session, r)
+    custody.hold(session, c.id, actor=ANALYST, reason="open complaint")
+    with pytest.raises(Refused, match="on hold"):
+        custody.dispose(
+            session, c.id, actor=SUPERVISOR, rules=r, method="Vendor pickup", today=c.retention_due
+        )
+    with pytest.raises(NotAllowed, match="may not record a held bottle as gone"):
+        custody.dispose(
+            session, c.id, actor=ANALYST, rules=r, method="Vendor pickup", today=c.retention_due, reason="x",
+            despite_hold=True,
+        )  # fmt: skip
+    with pytest.raises(Refused, match="say why"):
+        custody.dispose(
+            session, c.id, actor=SUPERVISOR, rules=r, method="Vendor pickup", today=c.retention_due,
+            despite_hold=True,
+        )  # fmt: skip
+    gone = custody.dispose(
+        session, c.id, actor=SUPERVISOR, rules=r, method="Vendor pickup", today=c.retention_due,
+        reason="put out with the waste by mistake", despite_hold=True,
+    )  # fmt: skip
+    assert gone.outcome == EventKind.DISPOSED and EventKind.HOLD in [e.kind for e in gone.events]
+    assert custody.verify(session) == []
